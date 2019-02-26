@@ -26,7 +26,8 @@ def result2polygon(image, result):
         for x, y, r in disk:
             cv2.circle(mask, (int(x), int(y)), int(r), (1), -1)
 
-    _, conts, _ = cv2.findContours(mask, cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)
+    # _, conts, _ = cv2.findContours(mask, cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)
+    conts, _ = cv2.findContours(mask, cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)
     conts = [cont[:, 0, :] for cont in conts]
     return conts
 
