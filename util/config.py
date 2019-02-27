@@ -18,6 +18,8 @@ config.start_epoch = 0
 config.lr = 1e-4
 
 # using GPU
+config.horovod = True
+
 config.cuda = True
 
 config.vis_num = 3

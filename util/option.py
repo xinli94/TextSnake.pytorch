@@ -83,7 +83,7 @@ class BaseOptions(object):
         # Setting default torch Tensor type
         if self.args.cuda and torch.cuda.is_available():
             torch.set_default_tensor_type('torch.cuda.FloatTensor')
-            cudnn.benchmark = True
+            # cudnn.benchmark = True
         else:
             torch.set_default_tensor_type('torch.FloatTensor')
 

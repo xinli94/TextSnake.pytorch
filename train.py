@@ -16,7 +16,6 @@ from util.misc import mkdirs, to_device
 from util.option import BaseOptions
 from util.visualize import visualize_network_output
 
-
 def save_model(model, epoch, lr):
 
     save_dir = os.path.join(cfg.save_dir, cfg.exp_name)
@@ -33,7 +32,7 @@ def save_model(model, epoch, lr):
     torch.save(state_dict, save_path)
 
 
-def train(model, train_loader, criterion, scheduler, optimizer, epoch):
+def train(model, train_loader, criterion, scheduler, optimizer, epoch, verbose=True):
 
     start = time.time()
     losses = AverageMeter()
@@ -64,20 +63,20 @@ def train(model, train_loader, criterion, scheduler, optimizer, epoch):
         batch_time.update(time.time() - end)
         end = time.time()
 
-        if cfg.viz and i < cfg.vis_num:
+        if cfg.viz and i < cfg.vis_num and verbose:
             visualize_network_output(output, tr_mask, tcl_mask, prefix='train_{}'.format(i))
 
-        if i % cfg.display_freq == 0:
+        if i % cfg.display_freq == 0 and verbose:
             print('Epoch: [ {} ][ {:03d} / {:03d} ] - Loss: {:.4f} - tr_loss: {:.4f} - tcl_loss: {:.4f} - sin_loss: {:.4f} - cos_loss: {:.4f} - radii_loss: {:.4f}'.format(
                 epoch, i, len(train_loader), loss.item(), tr_loss.item(), tcl_loss.item(), sin_loss.item(), cos_loss.item(), radii_loss.item())
             )
-    if epoch % cfg.save_freq == 0 and epoch > 0:
+    if epoch % cfg.save_freq == 0 and epoch > 0 and verbose:
         save_model(model, epoch, scheduler.get_lr())
 
     print('Training Loss: {}'.format(losses.avg))
 
 
-def validation(model, valid_loader, criterion):
+def validation(model, valid_loader, criterion, verbose=True):
 
     model.eval()
     losses = AverageMeter()
@@ -94,10 +93,10 @@ def validation(model, valid_loader, criterion):
         loss = tr_loss + tcl_loss + sin_loss + cos_loss + radii_loss
         losses.update(loss.item())
 
-        if cfg.viz and i < cfg.vis_num:
+        if cfg.viz and i < cfg.vis_num and verbose:
             visualize_network_output(output, tr_mask, tcl_mask, prefix='val_{}'.format(i))
 
-        if i % cfg.display_freq == 0:
+        if i % cfg.display_freq == 0 and verbose:
             print(
                 'Validation: - Loss: {:.4f} - tr_loss: {:.4f} - tcl_loss: {:.4f} - sin_loss: {:.4f} - cos_loss: {:.4f} - radii_loss: {:.4f}'.format(
                     loss.item(), tr_loss.item(), tcl_loss.item(), sin_loss.item(),
@@ -107,6 +106,17 @@ def validation(model, valid_loader, criterion):
 
 
 def main():
+    if cfg.horovod:
+        import horovod.torch as hvd
+        hvd.init()
+        torch.cuda.set_device(hvd.local_rank())
+        local_rank = hvd.local_rank()
+        world_size = hvd.size()
+    else:
+        local_rank = 0
+        world_size = 1
+
+    master = local_rank == 0
 
     trainset = TotalText(
         data_root='data/total-text',
@@ -122,26 +132,41 @@ def main():
         transform=BaseTransform(size=cfg.input_size, mean=cfg.means, std=cfg.stds)
     )
 
-    train_loader = data.DataLoader(trainset, batch_size=cfg.batch_size, shuffle=True, num_workers=cfg.num_workers)
+    if cfg.horovod:
+        train_sampler = torch.utils.data.distributed.DistributedSampler(trainset, num_replicas=hvd.size(), rank=hvd.rank())
+        train_loader = data.DataLoader(trainset, batch_size=cfg.batch_size, shuffle=False, num_workers=cfg.num_workers, sampler=train_sampler)
+    else:
+        train_sampler = None
+        train_loader = data.DataLoader(trainset, batch_size=cfg.batch_size, shuffle=True, num_workers=cfg.num_workers)
+
     val_loader = data.DataLoader(valset, batch_size=cfg.batch_size, shuffle=False, num_workers=cfg.num_workers)
 
     # Model
     model = TextNet()
+    if cfg.horovod:
+        model = torch.nn.DataParallel(model, device_ids=(local_rank,))
+    else:
+        model = torch.nn.DataParallel(model)
     # model = nn.DataParallel(model, device_ids=cfg.gpu_ids)
-
     model = model.to(cfg.device)
-    if cfg.cuda:
-        cudnn.benchmark = True
+
+    # if cfg.cuda:
+    #     cudnn.benchmark = True
 
     criterion = TextLoss()
     optimizer = torch.optim.Adam(model.parameters(), lr=cfg.lr)
+    if cfg.horovod:
+        optimizer = hvd.DistributedOptimizer(optimizer, named_parameters=model.named_parameters())
+        hvd.broadcast_parameters(model.state_dict(), root_rank=0)
+        hvd.broadcast_optimizer_state(optimizer, root_rank=0)
+
     scheduler = lr_scheduler.StepLR(optimizer, step_size=10000, gamma=0.94)
 
     print('Start training TextSnake.')
 
     for epoch in range(cfg.start_epoch, cfg.max_epoch):
-        train(model, train_loader, criterion, scheduler, optimizer, epoch)
-        validation(model, val_loader, criterion)
+        train(model, train_loader, criterion, scheduler, optimizer, epoch, verbose=master)
+        validation(model, val_loader, criterion, verbose=master)
 
     print('End.')
 
