@@ -63,6 +63,9 @@ class BaseOptions(object):
         self.parser.add_argument('--stds', type=int, default=(0.229, 0.224, 0.225), nargs='+', help='std')
         self.parser.add_argument('--input_size', default=512, type=int, help='model input size')
 
+        self.parser.add_argument('--data_root', default='data/total-text', type=str, help='Root to data dir')
+        self.parser.add_argument('--data_custom', action='store_true', default=False, help='Use 8 point data format')
+
         # test args
         self.parser.add_argument('--checkepoch', default=-1, type=int, help='Load checkpoint number')
 

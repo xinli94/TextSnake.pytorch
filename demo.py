@@ -96,10 +96,12 @@ def inference(model, detector, test_loader):
 def main():
 
     testset = TotalText(
-        data_root='data/total-text',
+        # data_root='data/total-text',
+        data_root=cfg.data_root,
         ignore_list=None,
         is_training=False,
-        transform=BaseTransform(size=cfg.input_size, mean=cfg.means, std=cfg.stds)
+        transform=BaseTransform(size=cfg.input_size, mean=cfg.means, std=cfg.stds),
+        data_custom=cfg.data_custom
     )
     test_loader = data.DataLoader(testset, batch_size=1, shuffle=False, num_workers=cfg.num_workers)
 
